@@ -1,0 +1,11 @@
+<component name="ArtifactManager">
+  <artifact name="HelloWorld:jar">
+    <output-path>$PROJECT_DIR$/out/artifacts/HelloWorld_jar</output-path>
+    <root id="root">
+      <element id="archive" name="HelloWorld.jar">
+        <element id="module-output" name="HelloWorld" />
+        <element id="extracted-dir" path="$USER_HOME$/Downloads/postgresql-42.1.4.jar" path-in-jar="/" />
+      </element>
+    </root>
+  </artifact>
+</component>

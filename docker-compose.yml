@@ -1,0 +1,26 @@
+
+
+version: "2"
+services:
+  viewpoint-docker:
+    image: test-docker:latest
+    environment:
+      - DATASOURCE_JDBC_URL=jdbc:postgresql://postgres:5432/
+      - DATASOURCE_USER=postgres
+      - DATASOURCE_PASSWORD=postgres
+   
+    entrypoint:
+      - java
+      - -Xmx200m
+      - -jar
+      - HelloWorld.jar
+    ports:
+      - "6666:6666"
+
+  postgres:
+    # build: ../postgres
+    image: postgres
+    environment:
+      - POSTGRES_PASSWORD=postgres
+    ports:
+    - "5433:5432"

@@ -1,0 +1,238 @@
+import org.apache.tools.ant.filters.ReplaceTokens
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'idea'
+apply plugin: 'docker'
+apply plugin: 'com.bmuschko.clover'
+apply plugin: 'application'
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'ivy-publish'
+apply plugin: 'maven-publish'
+
+
+repositories {
+    maven {
+        url "https://sdartifact.td.teradata.com/artifactory/mavenCentral"
+        credentials {
+            username = "$artifactoryUsername"
+            password = "$artifactoryPassword"
+        }
+    }
+    maven {
+        url "https://sdartifact.td.teradata.com/artifactory/jcenter"
+        credentials {
+            username = "$artifactoryUsername"
+            password = "$artifactoryPassword"
+        }
+    }
+    maven {
+        url "https://sdartifact.td.teradata.com/artifactory/dependencies-snapshot"
+        credentials {
+            username = "$artifactoryUsername"
+            password = "$artifactoryPassword"
+        }
+    }
+    maven {
+        url "https://sdartifact.td.teradata.com/artifactory/dependencies-released"
+        credentials {
+            username = "$artifactoryUsername"
+            password = "$artifactoryPassword"
+        }
+    }
+    ivy {
+        url "http://continuum.td.teradata.com/ivyrep"
+        layout "pattern", {
+            artifact "[organization]/[module]/[revision]/[artifact].[ext]"
+            ivy "[organization]/[module]/ivy-[revision].xml"
+            ivy "[organisation]/[module]/[revision]/ivy.xml"
+        }
+    }
+
+    mavenLocal()
+}
+
+configurations.all {
+    resolutionStrategy {
+        cacheChangingModulesFor 0, 'seconds'
+    }
+}
+
+shadowJar {
+    mergeServiceFiles();
+    baseName = "${project.name}-all"
+    classifier = null
+}
+
+group = projectGroup
+version = projectVersion
+sourceCompatibility = javaSourceCompatibility
+
+sonarqube {
+    properties {
+        property "sonar.clover.reportPath", "build/reports/clover/clover.xml"
+    }
+}
+
+clover {
+    report {
+        html = true
+    }
+}
+
+artifactory {
+    contextUrl = 'https://sdartifact.td.teradata.com/artifactory'
+    publish {
+        repository {
+            repoKey = 'dependencies-snapshot-sd'
+            username = "$artifactoryUsername"
+            password = "$artifactoryPassword"
+            ivy {
+                mavenCompatible = true
+            }
+        }
+        defaults {
+            publications ('shadow', 'ivyJava', 'mavenJava')
+        }
+    }
+}
+
+publishing {
+    publications {
+        shadow(MavenPublication) {
+            from components.shadow
+            groupId "$packagePath"
+            artifactId "${project.name}-all"
+        }
+        ivyJava(IvyPublication) {
+            organisation "$packagePath"
+            from components.java
+        }
+        mavenJava(MavenPublication) {
+            groupId "$packagePath"
+            from components.java
+        }
+    }
+}
+
+artifactoryPublish {
+    publications(publishing.publications.shadow)
+}
+
+task filterDockerfile(type: Copy) {
+    from 'docker/Dockerfile'
+    into 'build/dockertmp'
+    filter(ReplaceTokens, tokens: [projectName: project.name, projectVersion: project.version, imageLabel: versioning.info.full])
+}
+
+
+task buildDocker(type: Docker, dependsOn: [build, shadowJar, filterDockerfile]) {
+    push = false
+    applicationName = jar.baseName
+    tagVersion = 'latest'
+    dockerfile = file('build/dockertmp/Dockerfile')
+    doFirst {
+        copy {
+            from shadowJar
+            into stageDir
+            rename { String fileName ->
+                fileName.replace("-${project.version}", "")
+            }
+        }
+        copy {
+            from 'src/main/config'
+            into stageDir
+        }
+    }
+}
+
+task buildPushDockerTip(type: Docker, dependsOn: [build, shadowJar, filterDockerfile]) {
+    push = true
+    applicationName = "${project.group}/${jar.baseName}"
+    tagVersion = versioning.info.full
+    registry = "${dockerRegistry}"
+    dockerfile = file('build/dockertmp/Dockerfile')
+    doFirst {
+        copy {
+            from shadowJar
+            into stageDir
+            rename { String fileName ->
+                fileName.replace("-${project.version}", "")
+            }
+        }
+        copy {
+            from 'src/main/config'
+            into stageDir
+        }
+        exec {
+            commandLine "docker", "login", "-u", "${dockerUsername}", "-p", "${dockerPassword}", "${dockerRegistry}"
+        }
+    }
+    doLast {
+        exec {
+            commandLine "docker", "logout", "${dockerRegistry}"
+        }
+    }
+}
+
+task buildPushDocker(type: Docker, dependsOn: [buildPushDockerTip, filterDockerfile]) {
+    push = true
+    applicationName = "${project.group}/${jar.baseName}"
+    tagVersion = "${project.version}"
+    registry = "${dockerRegistry}"
+    dockerfile = file('build/dockertmp/Dockerfile')
+    doFirst {
+        copy {
+            from shadowJar
+            into stageDir
+            rename { String fileName ->
+                fileName.replace("-${project.version}", "")
+            }
+        }
+        copy {
+            from 'src/main/config'
+            into stageDir
+        }
+        exec {
+            commandLine "docker", "login", "-u", "${dockerUsername}", "-p", "${dockerPassword}", "${dockerRegistry}"
+        }
+    }
+    doLast {
+        exec {
+            commandLine "docker", "logout", "${dockerRegistry}"
+        }
+    }
+}
+
+task copyRuntimeLibs(type: Copy) {
+    from configurations.runtime
+    into "$buildDir/dependencies/runtime"
+}
+
+task copyBuildLibs(type: Copy) {
+    from configurations.testRuntime
+    into "$buildDir/dependencies/build"
+}
+
+task copyBuildScriptDependencies (type: Copy) {
+    from buildscript.configurations.classpath
+    into "$buildDir/dependencies/build"
+}
+
+task osat(type: JavaExec, dependsOn: ['build', 'copyRuntimeLibs', 'copyBuildLibs', 'copyBuildScriptDependencies']) {
+    main = "-jar"
+    doFirst {
+        args(project.configurations.testCompile.find { it.name.startsWith("osat-tracker") })
+    }
+}
+
+task buildInfo(dependsOn: [compileTestJava]) {
+    def infoShortSHA = versioning.info.build
+    def infoJsonString = "{\"version\" : \"$projectVersion\",\"build\" : ${System.env.BUILD_NUMBER},\"shortSHA\" : \"$infoShortSHA\"}"
+    def infoFile = new File("${sourceSets.main.output.resourcesDir}/build-info.json")
+    doLast{
+        infoFile.write(infoJsonString)
+    }
+}
+    
+jar.dependsOn buildInfo

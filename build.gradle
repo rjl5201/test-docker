@@ -1,0 +1,48 @@
+buildscript {
+    repositories {
+        jcenter()
+        maven {
+            url "https://sdartifact.td.teradata.com/artifactory/mavenCentral"
+            credentials {
+                username = "$artifactoryUsername"
+                password = "$artifactoryPassword"
+            }
+        }
+        maven {
+            url "https://sdartifact.td.teradata.com/artifactory/jcenter"
+            credentials {
+                username = "$artifactoryUsername"
+                password = "$artifactoryPassword"
+            }
+        }
+    }
+    dependencies {
+        classpath('se.transmode.gradle:gradle-docker:1.2')
+        classpath("com.bmuschko:gradle-clover-plugin:2.0.1")
+    }
+}
+
+
+// mainClassName = 'com.teradata.services.system.Application'
+
+
+
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'docker'
+
+
+
+task buildDocker(type: Docker) {
+    push = false
+    applicationName = 'test-docker'
+    tagVersion = 'latest'
+    dockerfile = file('docker/Dockerfile')
+    doFirst {
+        copy {
+            from 'HelloWorld.jar'
+            into stageDir
+
+        }
+    }
+}
